@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.imperium.domain.entity.OutboxEventEntity;
 import com.imperium.domain.mapper.OutboxEventMapper;
+import com.imperium.worker.model.DomainEventEnvelope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -52,7 +53,13 @@ public class OutboxPublisherJob {
 
     private void publishOne(OutboxEventEntity event) {
         try {
-            String payload = objectMapper.writeValueAsString(event.getPayloadJson());
+            String payload = objectMapper.writeValueAsString(new DomainEventEnvelope(
+                event.getId(),
+                event.getAggregateType(),
+                event.getAggregateId(),
+                event.getTag(),
+                event.getPayloadJson()
+            ));
             String destination = buildDestination(event);
             rocketMQTemplate.syncSend(destination, payload);
 

@@ -5,7 +5,6 @@ import com.imperium.api.exception.DocketException;
 import com.imperium.api.model.*;
 import com.imperium.domain.entity.DocketEntity;
 import com.imperium.domain.entity.DocketEventEntity;
-import com.imperium.domain.entity.OutboxEventEntity;
 import com.imperium.domain.entity.CaesarDecisionEntity;
 import com.imperium.domain.entity.DelegationEntity;
 import com.imperium.domain.entity.TribuneReviewEntity;
@@ -15,7 +14,6 @@ import com.imperium.domain.mapper.DelegationMapper;
 import com.imperium.domain.mapper.DocketEventMapper;
 import com.imperium.domain.mapper.DocketMapper;
 import com.imperium.domain.mapper.ExecutionTaskMapper;
-import com.imperium.domain.mapper.OutboxEventMapper;
 import com.imperium.domain.mapper.TribuneReviewMapper;
 import com.imperium.domain.model.DocketState;
 import com.imperium.domain.model.OperatingMode;
@@ -44,11 +42,11 @@ public class DocketService {
 
     private final DocketMapper docketMapper;
     private final DocketEventMapper docketEventMapper;
-    private final OutboxEventMapper outboxEventMapper;
     private final TribuneReviewMapper tribuneReviewMapper;
     private final CaesarDecisionMapper caesarDecisionMapper;
     private final DelegationMapper delegationMapper;
     private final ExecutionTaskMapper executionTaskMapper;
+    private final DocketEventService docketEventService;
 
     private static final Set<RoleCode> DELEGATABLE_ROLES = Set.of(
         RoleCode.LEGATUS,
@@ -81,7 +79,7 @@ public class DocketService {
         docketMapper.insert(entity);
 
         // 写入创建事件
-        recordEvent(id, "DOCKET_CREATED", "CAESAR", "CAESAR",
+        docketEventService.record(id, "DOCKET_CREATED", "CAESAR", "CAESAR",
             Map.of("mode", req.mode().getValue(), "edictRaw", req.edictRaw()));
 
         log.info("议案已创建：{} mode={}", id, req.mode());
@@ -138,18 +136,21 @@ public class DocketService {
     @Transactional
     public DocketDetailResponse tribuneApprove(String id, TribuneReviewRequest req) {
         recordTribuneReview(id, "APPROVED", req);
+        enterVetoReviewIfNeeded(id);
         return transitionByRole(id, DocketState.AWAITING_CAESAR, RoleCode.TRIBUNE, "保民官审查通过");
     }
 
     @Transactional
     public DocketDetailResponse tribuneReject(String id, TribuneReviewRequest req) {
         recordTribuneReview(id, "REJECTED", req);
+        enterVetoReviewIfNeeded(id);
         return transitionByRole(id, DocketState.REJECTED, RoleCode.TRIBUNE, safeText(req == null ? null : req.reason(), "保民官否决议案"));
     }
 
     @Transactional
     public DocketDetailResponse tribuneReturn(String id, TribuneReviewRequest req) {
         recordTribuneReview(id, "RETURNED", req);
+        enterVetoReviewIfNeeded(id);
         return transitionByRole(id, DocketState.IN_SENATE, RoleCode.TRIBUNE, safeText(req == null ? null : req.reason(), "保民官退回元老院重议"));
     }
 
@@ -195,7 +196,7 @@ public class DocketService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("count", created.size());
         payload.put("delegationIds", created.stream().map(DelegationResponse::id).toList());
-        recordEvent(docketId, "DELEGATION_CREATED", "ROLE", RoleCode.CONSUL.getValue(), payload);
+        docketEventService.record(docketId, "DELEGATION_CREATED", "ROLE", RoleCode.CONSUL.getValue(), payload);
 
         return created;
     }
@@ -234,7 +235,7 @@ public class DocketService {
         entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
-        recordEvent(id, "DOCKET_SUSPENDED", "CAESAR", "CAESAR",
+        docketEventService.record(id, "DOCKET_SUSPENDED", "CAESAR", "CAESAR",
             Map.of("suspendedFrom", entity.getSuspendedFromState().getValue(),
                    "comment", comment != null ? comment : ""));
         return toDetail(entity);
@@ -256,7 +257,7 @@ public class DocketService {
         entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
-        recordEvent(id, "DOCKET_RESUMED", "CAESAR", "CAESAR",
+        docketEventService.record(id, "DOCKET_RESUMED", "CAESAR", "CAESAR",
             Map.of("resumedTo", restoreState.getValue()));
         return toDetail(entity);
     }
@@ -275,7 +276,7 @@ public class DocketService {
         entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
-        recordEvent(id, "DOCKET_REVOKED", "CAESAR", "CAESAR",
+        docketEventService.record(id, "DOCKET_REVOKED", "CAESAR", "CAESAR",
             Map.of("comment", comment != null ? comment : ""));
         return toDetail(entity);
     }
@@ -309,7 +310,7 @@ public class DocketService {
         payload.put("from", prevState.getValue());
         payload.put("to", targetState.getValue());
         payload.put("comment", safeText(comment, ""));
-        recordEvent(id, "STATE_CHANGED", "ROLE", actor.getValue(), payload);
+        docketEventService.record(id, "STATE_CHANGED", "ROLE", actor.getValue(), payload);
 
         log.info("议案状态推进：{} {} → {} by {}", id, prevState, targetState, actor);
         return toDetail(entity);
@@ -357,6 +358,13 @@ public class DocketService {
         );
     }
 
+    private void enterVetoReviewIfNeeded(String docketId) {
+        DocketEntity docket = findOrThrow(docketId);
+        if (docket.getState() == DocketState.DEBATING) {
+            transitionByRole(docketId, DocketState.VETO_REVIEW, RoleCode.TRIBUNE, "保民官开始审查议案");
+        }
+    }
+
     private void recordTribuneReview(String docketId, String reviewResult, TribuneReviewRequest req) {
         TribuneReviewEntity review = new TribuneReviewEntity();
         review.setDocketId(docketId);
@@ -370,7 +378,7 @@ public class DocketService {
         payload.put("reviewResult", reviewResult);
         payload.put("reason", safeText(req == null ? null : req.reason(), ""));
         payload.put("notes", req == null || req.notes() == null ? List.of() : req.notes());
-        recordEvent(docketId, "TRIBUNE_REVIEW_MADE", "ROLE", RoleCode.TRIBUNE.getValue(), payload);
+        docketEventService.record(docketId, "TRIBUNE_REVIEW_MADE", "ROLE", RoleCode.TRIBUNE.getValue(), payload);
     }
 
     private void recordCaesarDecision(String docketId, String decisionType, CaesarDecisionRequest req, boolean isOverride) {
@@ -388,30 +396,7 @@ public class DocketService {
         payload.put("comment", safeText(req == null ? null : req.comment(), ""));
         payload.put("constraints", req == null || req.constraints() == null ? List.of() : req.constraints());
         payload.put("isOverride", isOverride);
-        recordEvent(docketId, "CAESAR_DECISION_MADE", "CAESAR", RoleCode.CAESAR.getValue(), payload);
-    }
-
-    private void recordEvent(String docketId, String eventType, String actorType,
-                             String actorId, Map<String, Object> payload) {
-        DocketEventEntity event = new DocketEventEntity();
-        event.setDocketId(docketId);
-        event.setEventType(eventType);
-        event.setActorType(actorType);
-        event.setActorId(actorId);
-        event.setPayloadJson(payload);
-        event.setCreatedAt(LocalDateTime.now());
-        docketEventMapper.insert(event);
-
-        OutboxEventEntity outbox = new OutboxEventEntity();
-        outbox.setAggregateType("DOCKET");
-        outbox.setAggregateId(docketId);
-        outbox.setTopic("imperium-domain-topic");
-        outbox.setTag(eventType);
-        outbox.setPayloadJson(payload);
-        outbox.setPublishStatus("PENDING");
-        outbox.setRetryCount(0);
-        outbox.setCreatedAt(LocalDateTime.now());
-        outboxEventMapper.insert(outbox);
+        docketEventService.record(docketId, "CAESAR_DECISION_MADE", "CAESAR", RoleCode.CAESAR.getValue(), payload);
     }
 
     private String generateId() {
