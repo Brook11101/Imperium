@@ -1,6 +1,9 @@
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import DocketListPage from './pages/DocketListPage'
 import DocketDetailPage from './pages/DocketDetailPage'
+import AuditPage from './pages/AuditPage'
+import ArchiveListPage from './pages/ArchiveListPage'
+import ArchiveDetailPage from './pages/ArchiveDetailPage'
 
 function App() {
   return (
@@ -12,6 +15,8 @@ function App() {
         </div>
         <nav className="nav-tabs">
           <NavLink to="/dockets">Dockets</NavLink>
+          <NavLink to="/audit">Audit</NavLink>
+          <NavLink to="/archives">Archives</NavLink>
         </nav>
       </header>
 
@@ -19,6 +24,9 @@ function App() {
         <Route path="/" element={<Navigate replace to="/dockets" />} />
         <Route path="/dockets" element={<DocketListPage />} />
         <Route path="/dockets/:docketId" element={<DocketDetailPage />} />
+        <Route path="/audit" element={<AuditPage />} />
+        <Route path="/archives" element={<ArchiveListPage />} />
+        <Route path="/archives/:docketId" element={<ArchiveDetailPage />} />
       </Routes>
     </main>
   )

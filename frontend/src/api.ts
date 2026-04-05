@@ -81,7 +81,35 @@ export type ExecutionTask = {
   updatedAt: string
 }
 
-const API_BASE = 'http://localhost:8080'
+export type AuditQueueItem = {
+  docketId: string
+  title: string
+  mode: string
+  priority: string
+  riskLevel: string
+  currentOwner: string
+  updatedAt: string
+}
+
+export type AuditRecord = {
+  id: number
+  docketId: string
+  auditResult: string
+  riskNotes: string[]
+  qualityNotes: string[]
+  createdAt: string
+}
+
+export type ArchiveRecord = {
+  id: number
+  docketId: string
+  title: string
+  finalSummary?: string | null
+  artifacts: string[]
+  archivedAt: string
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -138,4 +166,14 @@ export const api = {
     request<ExecutionTask>(`/api/execution-tasks/${id}/block`, { method: 'POST', body: JSON.stringify(body) }),
   completeExecutionTask: (id: string, body: { outputSummary?: string }) =>
     request<ExecutionTask>(`/api/execution-tasks/${id}/complete`, { method: 'POST', body: JSON.stringify(body) }),
+  listAuditQueue: () => request<AuditQueueItem[]>('/api/audit/queue'),
+  listAuditRecords: (id: string) => request<AuditRecord[]>(`/api/dockets/${id}/audit/records`),
+  auditPass: (id: string, body?: { riskNotes?: string[]; qualityNotes?: string[]; finalSummary?: string; artifacts?: string[] }) =>
+    request<ArchiveRecord>(`/api/dockets/${id}/audit/pass`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  auditReturn: (id: string, body?: { riskNotes?: string[]; qualityNotes?: string[]; finalSummary?: string; artifacts?: string[] }) =>
+    request<AuditRecord>(`/api/dockets/${id}/audit/return`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  auditEscalate: (id: string, body?: { riskNotes?: string[]; qualityNotes?: string[]; finalSummary?: string; artifacts?: string[] }) =>
+    request<AuditRecord>(`/api/dockets/${id}/audit/escalate`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  listArchives: () => request<ArchiveRecord[]>('/api/archives'),
+  getArchive: (docketId: string) => request<ArchiveRecord>(`/api/archives/${docketId}`),
 }
