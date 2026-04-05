@@ -163,15 +163,15 @@ public final class DocketStateMachine {
     /**
      * 查询指定状态下、指定角色在指定模式下可以流转到哪些目标状态
      */
-    public static List<DocketState> availableTransitions(DocketState from, RoleCode actor, OperatingMode mode) {
+    public static List<DocketState> availableTransitions(DocketState from, OperatingMode mode) {
         if (from.isTerminal() || from == SUSPENDED) {
             return List.of();
         }
         return TRANSITIONS.stream()
             .filter(t -> t.getFrom() == from)
-            .filter(t -> t.getAllowedActors() == null || t.getAllowedActors().isEmpty() || t.getAllowedActors().contains(actor))
             .filter(t -> t.getAllowedModes() == null || t.getAllowedModes().isEmpty() || t.getAllowedModes().contains(mode))
             .map(DocketTransition::getTo)
+            .distinct()
             .toList();
     }
 }

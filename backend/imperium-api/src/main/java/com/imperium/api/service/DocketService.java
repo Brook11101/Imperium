@@ -1,13 +1,14 @@
 package com.imperium.api.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.imperium.api.exception.DocketException;
 import com.imperium.api.model.*;
 import com.imperium.domain.entity.DocketEntity;
 import com.imperium.domain.entity.DocketEventEntity;
+import com.imperium.domain.entity.OutboxEventEntity;
 import com.imperium.domain.mapper.DocketEventMapper;
 import com.imperium.domain.mapper.DocketMapper;
+import com.imperium.domain.mapper.OutboxEventMapper;
 import com.imperium.domain.model.DocketState;
 import com.imperium.domain.model.RoleCode;
 import com.imperium.domain.statemachine.DocketStateMachine;
@@ -20,7 +21,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.UUID;
 
 /**
  * 议案业务服务
@@ -32,9 +33,7 @@ public class DocketService {
 
     private final DocketMapper docketMapper;
     private final DocketEventMapper docketEventMapper;
-
-    // 简单的当日序号计数器（生产环境应改用数据库序列）
-    private static final AtomicInteger dailySeq = new AtomicInteger(0);
+    private final OutboxEventMapper outboxEventMapper;
 
     /**
      * 创建议案（恺撒发布法令）
@@ -107,7 +106,7 @@ public class DocketService {
 
         DocketState prevState = entity.getState();
         entity.setState(req.targetState());
-        entity.setCurrentOwner(resolveNextOwner(req.targetState()));
+        entity.setCurrentOwner(resolveOwnerForState(req.targetState()));
         entity.setLastProgressAt(LocalDateTime.now());
         entity.setRetryCount(0);
         docketMapper.updateById(entity);
@@ -132,6 +131,8 @@ public class DocketService {
         }
         entity.setSuspendedFromState(entity.getState());
         entity.setState(DocketState.SUSPENDED);
+        entity.setCurrentOwner(RoleCode.CAESAR);
+        entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
         recordEvent(id, "DOCKET_SUSPENDED", "CAESAR", "CAESAR",
@@ -152,6 +153,7 @@ public class DocketService {
         DocketState restoreState = entity.getSuspendedFromState();
         entity.setState(restoreState);
         entity.setSuspendedFromState(null);
+        entity.setCurrentOwner(resolveOwnerForState(restoreState));
         entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
@@ -170,6 +172,8 @@ public class DocketService {
             throw new DocketException("INVALID_OPERATION", "议案已处于终态，无法撤销");
         }
         entity.setState(DocketState.REVOKED);
+        entity.setCurrentOwner(RoleCode.CAESAR);
+        entity.setLastProgressAt(LocalDateTime.now());
         docketMapper.updateById(entity);
 
         recordEvent(id, "DOCKET_REVOKED", "CAESAR", "CAESAR",
@@ -197,12 +201,24 @@ public class DocketService {
         event.setPayloadJson(payload);
         event.setCreatedAt(LocalDateTime.now());
         docketEventMapper.insert(event);
+
+        OutboxEventEntity outbox = new OutboxEventEntity();
+        outbox.setAggregateType("DOCKET");
+        outbox.setAggregateId(docketId);
+        outbox.setTopic("imperium-domain-topic");
+        outbox.setTag(eventType);
+        outbox.setPayloadJson(payload);
+        outbox.setPublishStatus("PENDING");
+        outbox.setRetryCount(0);
+        outbox.setCreatedAt(LocalDateTime.now());
+        outboxEventMapper.insert(outbox);
     }
 
     private String generateId() {
         String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        int seq = dailySeq.incrementAndGet() % 1000;
-        return "IMP-%s-%03d".formatted(date, seq);
+        // Use a random suffix to avoid collisions across restarts and future multi-node deployments.
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+        return "IMP-%s-%s".formatted(date, suffix);
     }
 
     private String extractTitle(String edictRaw) {
@@ -211,17 +227,17 @@ public class DocketService {
         return trimmed.length() > 64 ? trimmed.substring(0, 64) + "…" : trimmed;
     }
 
-    private RoleCode resolveNextOwner(DocketState state) {
+    private RoleCode resolveOwnerForState(DocketState state) {
         return switch (state) {
-            case EDICT_ISSUED -> RoleCode.PRAECO;
-            case TRIAGED, IN_SENATE, DEBATING -> RoleCode.SENATOR_STRATEGOS;
+            case EDICT_ISSUED, TRIAGED -> RoleCode.PRAECO;
+            case IN_SENATE, DEBATING -> RoleCode.SENATOR_STRATEGOS;
             case VETO_REVIEW -> RoleCode.TRIBUNE;
             case AWAITING_CAESAR -> RoleCode.CAESAR;
             case MANDATED, DELEGATED -> RoleCode.CONSUL;
             case IN_EXECUTION -> RoleCode.LEGATUS;
             case UNDER_AUDIT -> RoleCode.PRAETOR;
             case ARCHIVED -> RoleCode.SCRIBA;
-            default -> RoleCode.CAESAR;
+            case REJECTED, REVOKED, SUSPENDED -> RoleCode.CAESAR;
         };
     }
 
@@ -234,14 +250,13 @@ public class DocketService {
     }
 
     private DocketDetailResponse toDetail(DocketEntity e) {
-        List<DocketState> available = DocketStateMachine.availableTransitions(
-            e.getState(), e.getCurrentOwner(), e.getMode());
         return new DocketDetailResponse(
             e.getId(), e.getTitle(), e.getState(), e.getMode(),
             e.getPriority(), e.getRiskLevel(), e.getCurrentOwner(),
             e.getEdictRaw(), e.getSummary(),
             e.getLastProgressAt(), e.getRetryCount(), e.getEscalationLevel(),
-            e.getCreatedAt(), e.getUpdatedAt(), available
+            e.getCreatedAt(), e.getUpdatedAt(),
+            DocketStateMachine.availableTransitions(e.getState(), e.getMode())
         );
     }
 }
