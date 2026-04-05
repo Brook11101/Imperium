@@ -90,6 +90,28 @@ public class DocketService {
     }
 
     /**
+     * 查询议案时间线
+     */
+    public List<TimelineEventResponse> timeline(String id) {
+        findOrThrow(id);
+        return docketEventMapper.selectList(
+                new LambdaQueryWrapper<DocketEventEntity>()
+                    .eq(DocketEventEntity::getDocketId, id)
+                    .orderByAsc(DocketEventEntity::getCreatedAt)
+            ).stream()
+            .map(event -> new TimelineEventResponse(
+                event.getId(),
+                event.getDocketId(),
+                event.getEventType(),
+                event.getActorType(),
+                event.getActorId(),
+                event.getPayloadJson(),
+                event.getCreatedAt()
+            ))
+            .toList();
+    }
+
+    /**
      * 状态推进
      */
     @Transactional

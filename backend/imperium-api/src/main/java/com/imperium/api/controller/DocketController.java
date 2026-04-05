@@ -45,6 +45,12 @@ public class DocketController {
         return ApiResponse.success(docketService.get(id));
     }
 
+    @Operation(summary = "查询议案时间线")
+    @GetMapping("/{id}/timeline")
+    public ApiResponse<List<TimelineEventResponse>> timeline(@PathVariable String id) {
+        return ApiResponse.success(docketService.timeline(id));
+    }
+
     @Operation(summary = "推进议案状态")
     @PostMapping("/{id}/transition")
     public ApiResponse<DocketDetailResponse> transition(
