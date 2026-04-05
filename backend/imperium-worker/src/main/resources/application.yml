@@ -28,3 +28,9 @@ imperium:
   agent:
     callback-secret: ${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}
     default-timeout-sec: 120
+  outbox:
+    publisher:
+      enabled: ${IMPERIUM_OUTBOX_ENABLED:true}
+      interval-ms: ${IMPERIUM_OUTBOX_INTERVAL_MS:5000}
+      batch-size: ${IMPERIUM_OUTBOX_BATCH_SIZE:50}
+      max-retries: ${IMPERIUM_OUTBOX_MAX_RETRIES:10}
