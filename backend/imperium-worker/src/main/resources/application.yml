@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: imperium-worker
+  main:
+    web-application-type: none
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:imperium}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+  producer:
+    group: imperium-worker-producer
+
+imperium:
+  base-url: ${IMPERIUM_BASE_URL:http://localhost:8080}
+  openclaw:
+    path: ${OPENCLAW_PATH:openclaw}
+    workspace-root: ${OPENCLAW_WORKSPACE_ROOT:/tmp/imperium/workspaces}
+  agent:
+    callback-secret: ${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}
+    default-timeout-sec: 120
