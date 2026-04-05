@@ -2,6 +2,10 @@
 .idea/
 .vscode/
 *.iml
+.classpath
+.project
+.factorypath
+.settings/
 
 target/
 node_modules/

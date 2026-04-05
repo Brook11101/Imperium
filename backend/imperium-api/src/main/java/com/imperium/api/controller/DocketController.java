@@ -51,6 +51,69 @@ public class DocketController {
         return ApiResponse.success(docketService.timeline(id));
     }
 
+    @Operation(summary = "保民官审查通过")
+    @PostMapping("/{id}/tribune/approve")
+    public ApiResponse<DocketDetailResponse> tribuneApprove(
+        @PathVariable String id,
+        @RequestBody(required = false) TribuneReviewRequest req
+    ) {
+        return ApiResponse.success(docketService.tribuneApprove(id, req));
+    }
+
+    @Operation(summary = "保民官否决议案")
+    @PostMapping("/{id}/tribune/reject")
+    public ApiResponse<DocketDetailResponse> tribuneReject(
+        @PathVariable String id,
+        @RequestBody(required = false) TribuneReviewRequest req
+    ) {
+        return ApiResponse.success(docketService.tribuneReject(id, req));
+    }
+
+    @Operation(summary = "保民官退回元老院重议")
+    @PostMapping("/{id}/tribune/return")
+    public ApiResponse<DocketDetailResponse> tribuneReturn(
+        @PathVariable String id,
+        @RequestBody(required = false) TribuneReviewRequest req
+    ) {
+        return ApiResponse.success(docketService.tribuneReturn(id, req));
+    }
+
+    @Operation(summary = "恺撒批准议案")
+    @PostMapping("/{id}/caesar/approve")
+    public ApiResponse<DocketDetailResponse> caesarApprove(
+        @PathVariable String id,
+        @RequestBody(required = false) CaesarDecisionRequest req
+    ) {
+        return ApiResponse.success(docketService.caesarApprove(id, req));
+    }
+
+    @Operation(summary = "恺撒退回元老院")
+    @PostMapping("/{id}/caesar/reject")
+    public ApiResponse<DocketDetailResponse> caesarReject(
+        @PathVariable String id,
+        @RequestBody(required = false) CaesarDecisionRequest req
+    ) {
+        return ApiResponse.success(docketService.caesarReject(id, req));
+    }
+
+    @Operation(summary = "恺撒强制批准议案")
+    @PostMapping("/{id}/caesar/override")
+    public ApiResponse<DocketDetailResponse> caesarOverride(
+        @PathVariable String id,
+        @RequestBody(required = false) CaesarDecisionRequest req
+    ) {
+        return ApiResponse.success(docketService.caesarOverride(id, req));
+    }
+
+    @Operation(summary = "恺撒附加限制后批准")
+    @PostMapping("/{id}/caesar/restrict")
+    public ApiResponse<DocketDetailResponse> caesarRestrict(
+        @PathVariable String id,
+        @Valid @RequestBody CaesarDecisionRequest req
+    ) {
+        return ApiResponse.success(docketService.caesarRestrict(id, req));
+    }
+
     @Operation(summary = "推进议案状态")
     @PostMapping("/{id}/transition")
     public ApiResponse<DocketDetailResponse> transition(
