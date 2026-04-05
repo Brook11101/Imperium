@@ -7,10 +7,14 @@ import com.imperium.domain.entity.DocketEntity;
 import com.imperium.domain.entity.DocketEventEntity;
 import com.imperium.domain.entity.OutboxEventEntity;
 import com.imperium.domain.entity.CaesarDecisionEntity;
+import com.imperium.domain.entity.DelegationEntity;
 import com.imperium.domain.entity.TribuneReviewEntity;
+import com.imperium.domain.entity.ExecutionTaskEntity;
 import com.imperium.domain.mapper.CaesarDecisionMapper;
+import com.imperium.domain.mapper.DelegationMapper;
 import com.imperium.domain.mapper.DocketEventMapper;
 import com.imperium.domain.mapper.DocketMapper;
+import com.imperium.domain.mapper.ExecutionTaskMapper;
 import com.imperium.domain.mapper.OutboxEventMapper;
 import com.imperium.domain.mapper.TribuneReviewMapper;
 import com.imperium.domain.model.DocketState;
@@ -27,6 +31,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -42,6 +47,17 @@ public class DocketService {
     private final OutboxEventMapper outboxEventMapper;
     private final TribuneReviewMapper tribuneReviewMapper;
     private final CaesarDecisionMapper caesarDecisionMapper;
+    private final DelegationMapper delegationMapper;
+    private final ExecutionTaskMapper executionTaskMapper;
+
+    private static final Set<RoleCode> DELEGATABLE_ROLES = Set.of(
+        RoleCode.LEGATUS,
+        RoleCode.PRAETOR,
+        RoleCode.AEDILE,
+        RoleCode.QUAESTOR,
+        RoleCode.SCRIBA,
+        RoleCode.GOVERNOR
+    );
 
     /**
      * 创建议案（恺撒发布法令）
@@ -161,6 +177,40 @@ public class DocketService {
         return transitionByRole(id, DocketState.MANDATED, RoleCode.CAESAR, safeText(req.comment(), "恺撒附加限制后批准"));
     }
 
+    @Transactional
+    public List<DelegationResponse> createDelegations(String docketId, CreateDelegationRequest req) {
+        DocketEntity docket = findOrThrow(docketId);
+        if (docket.getState() != DocketState.MANDATED && docket.getState() != DocketState.DELEGATED) {
+            throw new DocketException("INVALID_OPERATION", "当前议案状态不允许派发执行项");
+        }
+
+        List<DelegationResponse> created = req.items().stream()
+            .map(item -> createDelegationItem(docketId, item))
+            .toList();
+
+        if (docket.getState() == DocketState.MANDATED) {
+            transitionByRole(docketId, DocketState.DELEGATED, RoleCode.CONSUL, "执政官已创建执行派发");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("count", created.size());
+        payload.put("delegationIds", created.stream().map(DelegationResponse::id).toList());
+        recordEvent(docketId, "DELEGATION_CREATED", "ROLE", RoleCode.CONSUL.getValue(), payload);
+
+        return created;
+    }
+
+    public List<DelegationResponse> listDelegations(String docketId) {
+        findOrThrow(docketId);
+        return delegationMapper.selectList(
+                new LambdaQueryWrapper<DelegationEntity>()
+                    .eq(DelegationEntity::getDocketId, docketId)
+                    .orderByAsc(DelegationEntity::getAssignedAt)
+            ).stream()
+            .map(this::toDelegationResponse)
+            .toList();
+    }
+
     /**
      * 状态推进
      */
@@ -265,6 +315,48 @@ public class DocketService {
         return toDetail(entity);
     }
 
+    private DelegationResponse createDelegationItem(String docketId, DelegationItemRequest item) {
+        if (!DELEGATABLE_ROLES.contains(item.roleCode())) {
+            throw new DocketException("INVALID_DELEGATION_ROLE", "该角色当前不允许由执政官直接派发：" + item.roleCode());
+        }
+
+        String delegationId = generateDelegationId();
+        String executionTaskId = generateExecutionTaskId();
+        LocalDateTime now = LocalDateTime.now();
+
+        DelegationEntity delegation = new DelegationEntity();
+        delegation.setId(delegationId);
+        delegation.setDocketId(docketId);
+        delegation.setRoleCode(item.roleCode());
+        delegation.setObjective(item.objective());
+        delegation.setStatus("PENDING");
+        delegation.setDependsOnJson(item.dependsOn() == null ? List.of() : item.dependsOn());
+        delegation.setAssignedAt(now);
+        delegationMapper.insert(delegation);
+
+        ExecutionTaskEntity task = new ExecutionTaskEntity();
+        task.setId(executionTaskId);
+        task.setDelegationId(delegationId);
+        task.setDocketId(docketId);
+        task.setRoleCode(item.roleCode());
+        task.setProgressPercent(0);
+        task.setStatus("PENDING");
+        task.setUpdatedAt(now);
+        executionTaskMapper.insert(task);
+
+        return new DelegationResponse(
+            delegationId,
+            docketId,
+            item.roleCode(),
+            item.objective(),
+            "PENDING",
+            item.dependsOn() == null ? List.of() : item.dependsOn(),
+            executionTaskId,
+            now,
+            null
+        );
+    }
+
     private void recordTribuneReview(String docketId, String reviewResult, TribuneReviewRequest req) {
         TribuneReviewEntity review = new TribuneReviewEntity();
         review.setDocketId(docketId);
@@ -329,6 +421,14 @@ public class DocketService {
         return "IMP-%s-%s".formatted(date, suffix);
     }
 
+    private String generateDelegationId() {
+        return "DEL-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+    }
+
+    private String generateExecutionTaskId() {
+        return "EXT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+    }
+
     private String extractTitle(String edictRaw) {
         if (edictRaw == null || edictRaw.isBlank()) return "未命名议案";
         String trimmed = edictRaw.strip();
@@ -369,6 +469,26 @@ public class DocketService {
             e.getLastProgressAt(), e.getRetryCount(), e.getEscalationLevel(),
             e.getCreatedAt(), e.getUpdatedAt(),
             DocketStateMachine.availableTransitions(e.getState(), e.getMode())
+        );
+    }
+
+    private DelegationResponse toDelegationResponse(DelegationEntity entity) {
+        ExecutionTaskEntity task = executionTaskMapper.selectOne(
+            new LambdaQueryWrapper<ExecutionTaskEntity>()
+                .eq(ExecutionTaskEntity::getDelegationId, entity.getId())
+                .last("LIMIT 1")
+        );
+
+        return new DelegationResponse(
+            entity.getId(),
+            entity.getDocketId(),
+            entity.getRoleCode(),
+            entity.getObjective(),
+            entity.getStatus(),
+            entity.getDependsOnJson() == null ? List.of() : entity.getDependsOnJson(),
+            task != null ? task.getId() : null,
+            entity.getAssignedAt(),
+            entity.getCompletedAt()
         );
     }
 }

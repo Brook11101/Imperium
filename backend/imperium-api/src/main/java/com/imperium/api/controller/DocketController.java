@@ -114,6 +114,21 @@ public class DocketController {
         return ApiResponse.success(docketService.caesarRestrict(id, req));
     }
 
+    @Operation(summary = "执政官创建派发项")
+    @PostMapping("/{id}/delegate")
+    public ApiResponse<List<DelegationResponse>> delegate(
+        @PathVariable String id,
+        @Valid @RequestBody CreateDelegationRequest req
+    ) {
+        return ApiResponse.success(docketService.createDelegations(id, req));
+    }
+
+    @Operation(summary = "查询议案派发列表")
+    @GetMapping("/{id}/delegations")
+    public ApiResponse<List<DelegationResponse>> delegations(@PathVariable String id) {
+        return ApiResponse.success(docketService.listDelegations(id));
+    }
+
     @Operation(summary = "推进议案状态")
     @PostMapping("/{id}/transition")
     public ApiResponse<DocketDetailResponse> transition(
