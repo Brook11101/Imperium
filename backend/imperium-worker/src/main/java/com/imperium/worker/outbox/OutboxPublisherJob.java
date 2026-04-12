@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.imperium.domain.entity.OutboxEventEntity;
 import com.imperium.domain.mapper.OutboxEventMapper;
 import com.imperium.worker.model.DomainEventEnvelope;
+import com.imperium.worker.orchestration.DomainEventRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -28,7 +29,8 @@ public class OutboxPublisherJob {
 
     private final OutboxEventMapper outboxEventMapper;
     private final RocketMQTemplate rocketMQTemplate;
-    private final ObjectMapper objectMapper;
+    private final DomainEventRouter domainEventRouter;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${imperium.outbox.publisher.batch-size:50}")
     private int batchSize;
@@ -36,18 +38,29 @@ public class OutboxPublisherJob {
     @Value("${imperium.outbox.publisher.max-retries:10}")
     private int maxRetries;
 
+    @Value("${imperium.outbox.local-dispatch-enabled:false}")
+    private boolean localDispatchEnabled;
+
     @Scheduled(fixedDelayString = "${imperium.outbox.publisher.interval-ms:5000}")
     public void publishPendingEvents() {
-        List<OutboxEventEntity> events = outboxEventMapper.selectList(
-            new LambdaQueryWrapper<OutboxEventEntity>()
-                .in(OutboxEventEntity::getPublishStatus, List.of("PENDING", "FAILED"))
-                .lt(OutboxEventEntity::getRetryCount, maxRetries)
-                .orderByAsc(OutboxEventEntity::getCreatedAt)
-                .last("LIMIT " + batchSize)
-        );
+        try {
+            List<OutboxEventEntity> events = outboxEventMapper.selectList(
+                new LambdaQueryWrapper<OutboxEventEntity>()
+                    .in(OutboxEventEntity::getPublishStatus, List.of("PENDING", "FAILED"))
+                    .lt(OutboxEventEntity::getRetryCount, maxRetries)
+                    .orderByAsc(OutboxEventEntity::getCreatedAt)
+                    .last("LIMIT " + batchSize)
+            );
 
-        for (OutboxEventEntity event : events) {
-            publishOne(event);
+            if (!events.isEmpty()) {
+                log.info("Outbox 扫描到 {} 条待发布事件", events.size());
+            }
+
+            for (OutboxEventEntity event : events) {
+                publishOne(event);
+            }
+        } catch (Throwable ex) {
+            log.warn("Outbox 定时发布任务异常：{}", ex.getMessage(), ex);
         }
     }
 
@@ -61,7 +74,17 @@ public class OutboxPublisherJob {
                 event.getPayloadJson()
             ));
             String destination = buildDestination(event);
-            rocketMQTemplate.syncSend(destination, payload);
+            if (localDispatchEnabled) {
+                domainEventRouter.route(event.getTag(), new DomainEventEnvelope(
+                    event.getId(),
+                    event.getAggregateType(),
+                    event.getAggregateId(),
+                    event.getTag(),
+                    event.getPayloadJson()
+                ));
+            } else {
+                rocketMQTemplate.syncSend(destination, payload);
+            }
 
             event.setPublishStatus("PUBLISHED");
             event.setPublishedAt(LocalDateTime.now());
@@ -70,7 +93,7 @@ public class OutboxPublisherJob {
             log.info("Outbox 事件已发布：id={} destination={}", event.getId(), destination);
         } catch (JsonProcessingException ex) {
             markFailed(event, "JSON 序列化失败", ex);
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
             markFailed(event, "RocketMQ 发布失败", ex);
         }
     }
@@ -82,7 +105,7 @@ public class OutboxPublisherJob {
         return event.getTopic() + ":" + event.getTag();
     }
 
-    private void markFailed(OutboxEventEntity event, String message, Exception ex) {
+    private void markFailed(OutboxEventEntity event, String message, Throwable ex) {
         event.setPublishStatus("FAILED");
         event.setRetryCount((event.getRetryCount() == null ? 0 : event.getRetryCount()) + 1);
         outboxEventMapper.updateById(event);

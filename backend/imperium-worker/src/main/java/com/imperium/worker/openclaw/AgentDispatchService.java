@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Agent 调度服务
@@ -81,20 +82,22 @@ public class AgentDispatchService {
             Docket ID: %s
             Senate Session ID: %s
 
-            Produce a senate opinion with stance, summary, and details.
-            Then call:
-            POST %s/internal/agent-callback/result
-            Secret header: X-Agent-Callback-Secret = %s
-            JSON body fields:
-            - docketId
-            - roleCode
-            - senateSessionId
-            - stance
-            - summary
-            - details
-            """.formatted(roleCode.getValue(), docketId, sessionId, baseUrl, callbackSecret);
+            Your only task is to submit one senate opinion.
+            Use the exec tool and curl. Do not ask follow-up questions. Do not produce long explanations.
 
-        executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt);
+            Choose exactly one stance from SUPPORT, OBJECT, CONDITION, NEUTRAL.
+
+            Execute a single callback:
+            curl -sS -X POST '%s/internal/agent-callback/result' \
+              -H 'Content-Type: application/json' \
+              -H 'X-Agent-Callback-Secret: %s' \
+              -d '{"docketId":"%s","roleCode":"%s","senateSessionId":"%s","stance":"SUPPORT","summary":"<one sentence>","details":"<short details>"}'
+
+            Replace stance/summary/details with your actual opinion.
+            After the callback succeeds, respond with exactly: CALLBACK_OK
+            """.formatted(roleCode.getValue(), docketId, sessionId, baseUrl, callbackSecret, docketId, roleCode.getValue(), sessionId);
+
+        CompletableFuture.runAsync(() -> executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt));
     }
 
     public void dispatchTribuneRole(String docketId) {
@@ -117,16 +120,19 @@ public class AgentDispatchService {
             - reject
             - return
 
-            Then call exactly one of the following endpoints:
-            POST %s/api/dockets/%s/tribune/approve
-            POST %s/api/dockets/%s/tribune/reject
-            POST %s/api/dockets/%s/tribune/return
+            Use the exec tool and curl. Do not ask follow-up questions.
 
-            Header: X-Agent-Callback-Secret = %s
-            Body may include reason and notes.
+            Call exactly one endpoint:
+            - %s/api/dockets/%s/tribune/approve
+            - %s/api/dockets/%s/tribune/reject
+            - %s/api/dockets/%s/tribune/return
+
+            Header: X-Agent-Callback-Secret: %s
+            JSON body may contain reason and notes.
+            After the callback succeeds, respond with exactly: CALLBACK_OK
             """.formatted(docketId, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
 
-        executeLoggedCall(docketId, RoleCode.TRIBUNE, config.getAgentId(), prompt);
+        CompletableFuture.runAsync(() -> executeLoggedCall(docketId, RoleCode.TRIBUNE, config.getAgentId(), prompt));
     }
 
     public void dispatchAuditRoles(String docketId) {
@@ -145,7 +151,9 @@ public class AgentDispatchService {
             You are %s in Imperium.
             Docket ID: %s
 
-            Review the docket in audit stage. If you find execution issues, call:
+            Use the exec tool and curl.
+
+            If you find execution issues, call:
             POST %s/api/dockets/%s/audit/return
 
             If you find strategic risk, call:
@@ -154,11 +162,12 @@ public class AgentDispatchService {
             If the docket is acceptable, call:
             POST %s/api/dockets/%s/audit/pass
 
-            Header: X-Agent-Callback-Secret = %s
+            Header: X-Agent-Callback-Secret: %s
             Body may include riskNotes, qualityNotes, finalSummary, artifacts.
+            After the callback succeeds, respond with exactly: CALLBACK_OK
             """.formatted(roleCode.getValue(), docketId, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
 
-        executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt);
+        CompletableFuture.runAsync(() -> executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt));
     }
 
     private void dispatchExecutionTask(ExecutionTaskEntity task) {
@@ -177,17 +186,20 @@ public class AgentDispatchService {
             Docket ID: %s
             Execution Task ID: %s
 
-            Start the assigned work and report progress through:
-            POST %s/internal/agent-callback/progress
-            Secret header: X-Agent-Callback-Secret = %s
+            Use the exec tool and curl. Do not ask follow-up questions unless absolutely blocked.
 
-            When finished, call:
-            POST %s/internal/agent-callback/result
-            Secret header: X-Agent-Callback-Secret = %s
-            Include docketId, roleCode, executionTaskId, progressPercent, summary, and outputSummary.
-            """.formatted(task.getRoleCode().getValue(), task.getDocketId(), task.getId(), baseUrl, callbackSecret, baseUrl, callbackSecret);
+            First, report progress to:
+            %s/internal/agent-callback/progress
 
-        executeLoggedCall(task.getDocketId(), task.getRoleCode(), config.getAgentId(), prompt);
+            When your work is complete, report result to:
+            %s/internal/agent-callback/result
+
+            Header: X-Agent-Callback-Secret: %s
+            JSON must include docketId, roleCode, executionTaskId, progressPercent, summary, and outputSummary.
+            After the final callback succeeds, respond with exactly: CALLBACK_OK
+            """.formatted(task.getRoleCode().getValue(), task.getDocketId(), task.getId(), baseUrl, baseUrl, callbackSecret);
+
+        CompletableFuture.runAsync(() -> executeLoggedCall(task.getDocketId(), task.getRoleCode(), config.getAgentId(), prompt));
     }
 
     private boolean isReadyForDispatch(ExecutionTaskEntity task) {

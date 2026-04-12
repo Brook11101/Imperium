@@ -9,3 +9,8 @@ imperium:
     secret: ${IMPERIUM_INTERNAL_SECRET:${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}}
   openclaw:
     startup-validation: true
+  events:
+    consumer:
+      enabled: false
+  outbox:
+    local-dispatch-enabled: true

@@ -34,6 +34,10 @@ public class OrchestrationClient {
         post("/internal/orchestration/dockets/" + docketId + "/finalize-senate");
     }
 
+    public void openSenate(String docketId) throws IOException, InterruptedException {
+        post("/api/dockets/" + docketId + "/senate/open");
+    }
+
     private void post(String path) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + path))
