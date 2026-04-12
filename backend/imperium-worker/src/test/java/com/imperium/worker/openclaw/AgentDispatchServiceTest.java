@@ -10,6 +10,7 @@ import com.imperium.domain.mapper.DocketMapper;
 import com.imperium.domain.mapper.ExecutionTaskMapper;
 import com.imperium.domain.mapper.RoleConfigMapper;
 import com.imperium.domain.mapper.SenateOpinionMapper;
+import com.imperium.domain.mapper.SenateSessionMapper;
 import com.imperium.domain.mapper.TribuneReviewMapper;
 import com.imperium.domain.model.RoleCode;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class AgentDispatchServiceTest {
     @Mock private DelegationMapper delegationMapper;
     @Mock private DocketMapper docketMapper;
     @Mock private SenateOpinionMapper senateOpinionMapper;
+    @Mock private SenateSessionMapper senateSessionMapper;
     @Mock private TribuneReviewMapper tribuneReviewMapper;
 
     @Test
@@ -47,6 +49,7 @@ class AgentDispatchServiceTest {
             delegationMapper,
             docketMapper,
             senateOpinionMapper,
+            senateSessionMapper,
             tribuneReviewMapper
         );
         ReflectionTestUtils.setField(service, "baseUrl", "http://localhost:8080");

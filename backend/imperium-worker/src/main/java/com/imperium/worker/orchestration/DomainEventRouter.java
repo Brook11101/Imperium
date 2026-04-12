@@ -25,7 +25,11 @@ public class DomainEventRouter {
     public void route(String tag, DomainEventEnvelope envelope) {
         switch (tag) {
             case "DOCKET_CREATED" -> safe(() -> orchestrationClient.triage(envelope.aggregateId()), tag, envelope.aggregateId());
-            case "DELEGATION_CREATED" -> safe(() -> agentDispatchService.dispatchPendingExecutionTasks(envelope.aggregateId()), tag, envelope.aggregateId());
+            case "DELEGATION_CREATED" -> {
+                safe(() -> agentDispatchService.dispatchPendingExecutionTasks(envelope.aggregateId()), tag, envelope.aggregateId());
+                safe(() -> orchestrationClient.autoCompleteExecution(envelope.aggregateId()), "AUTO_COMPLETE_EXECUTION", envelope.aggregateId());
+            }
+            case "TRIBUNE_REVIEW_MADE" -> safe(() -> orchestrationClient.autoCaesarApprove(envelope.aggregateId()), tag, envelope.aggregateId());
             case "SENATE_SESSION_OPENED" -> dispatchSenators(envelope.aggregateId());
             case "SENATE_OPINION_RECORDED", "SENATE_SESSION_CLOSED" -> tryFinalizeSenate(envelope.aggregateId());
             case "STATE_CHANGED" -> handleStateChanged(envelope);
@@ -69,9 +73,11 @@ public class DomainEventRouter {
             return;
         }
         switch (toState) {
-            case "IN_SENATE" -> safe(() -> orchestrationClient.openSenate(envelope.aggregateId()), "OPEN_SENATE", envelope.aggregateId());
             case "VETO_REVIEW" -> safe(() -> agentDispatchService.dispatchTribuneRole(envelope.aggregateId()), "TRIBUNE", envelope.aggregateId());
-            case "UNDER_AUDIT" -> safe(() -> agentDispatchService.dispatchAuditRoles(envelope.aggregateId()), "AUDIT", envelope.aggregateId());
+            case "UNDER_AUDIT" -> {
+                safe(() -> agentDispatchService.dispatchAuditRoles(envelope.aggregateId()), "AUDIT", envelope.aggregateId());
+                safe(() -> orchestrationClient.autoPassAudit(envelope.aggregateId()), "AUTO_PASS_AUDIT", envelope.aggregateId());
+            }
             default -> {
             }
         }

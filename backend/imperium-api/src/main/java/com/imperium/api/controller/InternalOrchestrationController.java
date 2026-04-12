@@ -50,6 +50,50 @@ public class InternalOrchestrationController {
         return ApiResponse.success(null);
     }
 
+    @PostMapping("/{id}/auto-caesar-approve")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> autoCaesarApprove(
+        @RequestHeader("X-Imperium-Internal-Secret") String secret,
+        @PathVariable String id
+    ) {
+        verifySecret(secret);
+        workflowAutomationService.autoCaesarApprove(id);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/{id}/auto-delegate")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> autoDelegate(
+        @RequestHeader("X-Imperium-Internal-Secret") String secret,
+        @PathVariable String id
+    ) {
+        verifySecret(secret);
+        workflowAutomationService.autoDelegate(id);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/{id}/auto-complete-execution")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> autoCompleteExecution(
+        @RequestHeader("X-Imperium-Internal-Secret") String secret,
+        @PathVariable String id
+    ) {
+        verifySecret(secret);
+        workflowAutomationService.autoCompleteExecution(id);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/{id}/auto-pass-audit")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> autoPassAudit(
+        @RequestHeader("X-Imperium-Internal-Secret") String secret,
+        @PathVariable String id
+    ) {
+        verifySecret(secret);
+        workflowAutomationService.autoPassAudit(id);
+        return ApiResponse.success(null);
+    }
+
     private void verifySecret(String secret) {
         if (!internalSecret.equals(secret)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "invalid internal secret");

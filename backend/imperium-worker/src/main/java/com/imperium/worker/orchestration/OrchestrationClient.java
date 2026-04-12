@@ -38,6 +38,22 @@ public class OrchestrationClient {
         post("/api/dockets/" + docketId + "/senate/open");
     }
 
+    public void autoCaesarApprove(String docketId) throws IOException, InterruptedException {
+        post("/internal/orchestration/dockets/" + docketId + "/auto-caesar-approve");
+    }
+
+    public void autoDelegate(String docketId) throws IOException, InterruptedException {
+        post("/internal/orchestration/dockets/" + docketId + "/auto-delegate");
+    }
+
+    public void autoCompleteExecution(String docketId) throws IOException, InterruptedException {
+        post("/internal/orchestration/dockets/" + docketId + "/auto-complete-execution");
+    }
+
+    public void autoPassAudit(String docketId) throws IOException, InterruptedException {
+        post("/internal/orchestration/dockets/" + docketId + "/auto-pass-audit");
+    }
+
     private void post(String path) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + path))

@@ -6,12 +6,15 @@ import com.imperium.domain.entity.DelegationEntity;
 import com.imperium.domain.entity.DocketEntity;
 import com.imperium.domain.entity.ExecutionTaskEntity;
 import com.imperium.domain.entity.RoleConfigEntity;
+import com.imperium.domain.entity.SenateOpinionEntity;
+import com.imperium.domain.entity.SenateSessionEntity;
 import com.imperium.domain.mapper.AgentCallLogMapper;
 import com.imperium.domain.mapper.DelegationMapper;
 import com.imperium.domain.mapper.DocketMapper;
 import com.imperium.domain.mapper.ExecutionTaskMapper;
 import com.imperium.domain.mapper.RoleConfigMapper;
 import com.imperium.domain.mapper.SenateOpinionMapper;
+import com.imperium.domain.mapper.SenateSessionMapper;
 import com.imperium.domain.mapper.TribuneReviewMapper;
 import com.imperium.domain.model.RoleCode;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +43,7 @@ public class AgentDispatchService {
     private final DelegationMapper delegationMapper;
     private final DocketMapper docketMapper;
     private final SenateOpinionMapper senateOpinionMapper;
+    private final SenateSessionMapper senateSessionMapper;
     private final TribuneReviewMapper tribuneReviewMapper;
 
     @Value("${imperium.base-url:http://localhost:8080}")
@@ -111,9 +115,13 @@ public class AgentDispatchService {
             return;
         }
 
+        String senateContext = buildSenateContext(docketId);
         String prompt = """
             You are TRIBUNE in Imperium.
             Docket ID: %s
+
+            Current senate output:
+            %s
 
             Review the current senate output and choose one action:
             - approve
@@ -130,7 +138,7 @@ public class AgentDispatchService {
             Header: X-Agent-Callback-Secret: %s
             JSON body may contain reason and notes.
             After the callback succeeds, respond with exactly: CALLBACK_OK
-            """.formatted(docketId, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
+            """.formatted(docketId, senateContext, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
 
         CompletableFuture.runAsync(() -> executeLoggedCall(docketId, RoleCode.TRIBUNE, config.getAgentId(), prompt));
     }
@@ -235,6 +243,39 @@ public class AgentDispatchService {
             new LambdaQueryWrapper<com.imperium.domain.entity.TribuneReviewEntity>()
                 .eq(com.imperium.domain.entity.TribuneReviewEntity::getDocketId, docketId)
         ) > 0;
+    }
+
+    private String buildSenateContext(String docketId) {
+        SenateSessionEntity session = senateSessionMapper.selectOne(
+            new LambdaQueryWrapper<SenateSessionEntity>()
+                .eq(SenateSessionEntity::getDocketId, docketId)
+                .orderByDesc(SenateSessionEntity::getOpenedAt)
+                .last("LIMIT 1")
+        );
+        if (session == null) {
+            return "No senate session available.";
+        }
+
+        List<SenateOpinionEntity> opinions = senateOpinionMapper.selectList(
+            new LambdaQueryWrapper<SenateOpinionEntity>()
+                .eq(SenateOpinionEntity::getSessionId, session.getId())
+                .orderByAsc(SenateOpinionEntity::getGeneratedAt)
+        );
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("sessionId=").append(session.getId())
+            .append(", status=").append(session.getStatus())
+            .append(", motion=").append(session.getRecommendedMotion())
+            .append("\nconsensus=").append(session.getConsensusJson() == null ? List.of() : session.getConsensusJson())
+            .append("\ndisputes=").append(session.getDisputesJson() == null ? List.of() : session.getDisputesJson())
+            .append("\nopinions=");
+        for (SenateOpinionEntity opinion : opinions) {
+            builder.append("\n- ")
+                .append(opinion.getAgentId().getValue())
+                .append(" [").append(opinion.getStance()).append("] ")
+                .append(opinion.getSummary());
+        }
+        return builder.toString();
     }
 
     private RoleConfigEntity findRoleConfig(RoleCode roleCode) {
