@@ -1,0 +1,8 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+imperium:
+  internal:
+    secret: ${IMPERIUM_INTERNAL_SECRET:${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}}

@@ -1,0 +1,11 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+imperium:
+  base-url: ${IMPERIUM_BASE_URL:http://localhost:8080}
+  internal:
+    secret: ${IMPERIUM_INTERNAL_SECRET:${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}}
+  openclaw:
+    startup-validation: true

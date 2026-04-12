@@ -2,11 +2,17 @@ package com.imperium.worker.openclaw;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.imperium.domain.entity.AgentCallLogEntity;
+import com.imperium.domain.entity.DelegationEntity;
+import com.imperium.domain.entity.DocketEntity;
 import com.imperium.domain.entity.ExecutionTaskEntity;
 import com.imperium.domain.entity.RoleConfigEntity;
 import com.imperium.domain.mapper.AgentCallLogMapper;
+import com.imperium.domain.mapper.DelegationMapper;
+import com.imperium.domain.mapper.DocketMapper;
 import com.imperium.domain.mapper.ExecutionTaskMapper;
 import com.imperium.domain.mapper.RoleConfigMapper;
+import com.imperium.domain.mapper.SenateOpinionMapper;
+import com.imperium.domain.mapper.TribuneReviewMapper;
 import com.imperium.domain.model.RoleCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -29,6 +36,10 @@ public class AgentDispatchService {
     private final RoleConfigMapper roleConfigMapper;
     private final AgentCallLogMapper agentCallLogMapper;
     private final OpenClawCliClient openClawCliClient;
+    private final DelegationMapper delegationMapper;
+    private final DocketMapper docketMapper;
+    private final SenateOpinionMapper senateOpinionMapper;
+    private final TribuneReviewMapper tribuneReviewMapper;
 
     @Value("${imperium.base-url:http://localhost:8080}")
     private String baseUrl;
@@ -40,18 +51,25 @@ public class AgentDispatchService {
     private int defaultTimeoutSec;
 
     public void dispatchPendingExecutionTasks(String docketId) {
-        List<ExecutionTaskEntity> tasks = executionTaskMapper.selectList(
+        List<ExecutionTaskEntity> candidates = executionTaskMapper.selectList(
             new LambdaQueryWrapper<ExecutionTaskEntity>()
                 .eq(ExecutionTaskEntity::getDocketId, docketId)
                 .eq(ExecutionTaskEntity::getStatus, "PENDING")
         );
 
-        for (ExecutionTaskEntity task : tasks) {
+        for (ExecutionTaskEntity task : candidates) {
+            if (!isReadyForDispatch(task)) {
+                continue;
+            }
             dispatchExecutionTask(task);
         }
     }
 
     public void dispatchSenateRole(String docketId, String sessionId, RoleCode roleCode) {
+        if (hasSenateOpinion(sessionId, roleCode)) {
+            log.info("跳过元老调度：session={} role={} 已有意见", sessionId, roleCode);
+            return;
+        }
         RoleConfigEntity config = findRoleConfig(roleCode);
         if (config == null) {
             log.info("跳过元老调度：role={} 未配置 agentId", roleCode);
@@ -79,12 +97,80 @@ public class AgentDispatchService {
         executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt);
     }
 
+    public void dispatchTribuneRole(String docketId) {
+        if (hasTribuneReview(docketId)) {
+            log.info("跳过保民官调度：docket={} 已存在审查记录", docketId);
+            return;
+        }
+        RoleConfigEntity config = findRoleConfig(RoleCode.TRIBUNE);
+        if (config == null) {
+            log.info("跳过保民官调度：未配置 agentId");
+            return;
+        }
+
+        String prompt = """
+            You are TRIBUNE in Imperium.
+            Docket ID: %s
+
+            Review the current senate output and choose one action:
+            - approve
+            - reject
+            - return
+
+            Then call exactly one of the following endpoints:
+            POST %s/api/dockets/%s/tribune/approve
+            POST %s/api/dockets/%s/tribune/reject
+            POST %s/api/dockets/%s/tribune/return
+
+            Header: X-Agent-Callback-Secret = %s
+            Body may include reason and notes.
+            """.formatted(docketId, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
+
+        executeLoggedCall(docketId, RoleCode.TRIBUNE, config.getAgentId(), prompt);
+    }
+
+    public void dispatchAuditRoles(String docketId) {
+        dispatchAuditRole(docketId, RoleCode.PRAETOR);
+        dispatchAuditRole(docketId, RoleCode.SCRIBA);
+    }
+
+    private void dispatchAuditRole(String docketId, RoleCode roleCode) {
+        RoleConfigEntity config = findRoleConfig(roleCode);
+        if (config == null) {
+            log.info("跳过审计调度：role={} 未配置 agentId", roleCode);
+            return;
+        }
+
+        String prompt = """
+            You are %s in Imperium.
+            Docket ID: %s
+
+            Review the docket in audit stage. If you find execution issues, call:
+            POST %s/api/dockets/%s/audit/return
+
+            If you find strategic risk, call:
+            POST %s/api/dockets/%s/audit/escalate
+
+            If the docket is acceptable, call:
+            POST %s/api/dockets/%s/audit/pass
+
+            Header: X-Agent-Callback-Secret = %s
+            Body may include riskNotes, qualityNotes, finalSummary, artifacts.
+            """.formatted(roleCode.getValue(), docketId, baseUrl, docketId, baseUrl, docketId, baseUrl, docketId, callbackSecret);
+
+        executeLoggedCall(docketId, roleCode, config.getAgentId(), prompt);
+    }
+
     private void dispatchExecutionTask(ExecutionTaskEntity task) {
         RoleConfigEntity config = findRoleConfig(task.getRoleCode());
         if (config == null) {
             log.info("跳过执行任务调度：task={} role={} 未配置 agentId", task.getId(), task.getRoleCode());
             return;
         }
+
+        task.setStatus("DISPATCHING");
+        task.setUpdatedAt(LocalDateTime.now());
+        executionTaskMapper.updateById(task);
 
         String prompt = """
             You are %s in Imperium.
@@ -102,6 +188,41 @@ public class AgentDispatchService {
             """.formatted(task.getRoleCode().getValue(), task.getDocketId(), task.getId(), baseUrl, callbackSecret, baseUrl, callbackSecret);
 
         executeLoggedCall(task.getDocketId(), task.getRoleCode(), config.getAgentId(), prompt);
+    }
+
+    private boolean isReadyForDispatch(ExecutionTaskEntity task) {
+        DelegationEntity delegation = delegationMapper.selectById(task.getDelegationId());
+        if (delegation == null || delegation.getDependsOnJson() == null || delegation.getDependsOnJson().isEmpty()) {
+            return true;
+        }
+
+        List<String> incomplete = new ArrayList<>();
+        for (String dependencyId : delegation.getDependsOnJson()) {
+            DelegationEntity dependency = delegationMapper.selectById(dependencyId);
+            if (dependency == null || !"COMPLETED".equals(dependency.getStatus())) {
+                incomplete.add(dependencyId);
+            }
+        }
+        if (!incomplete.isEmpty()) {
+            log.info("任务 {} 暂不派发，依赖未完成: {}", task.getId(), incomplete);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean hasSenateOpinion(String sessionId, RoleCode roleCode) {
+        return senateOpinionMapper.selectCount(
+            new LambdaQueryWrapper<com.imperium.domain.entity.SenateOpinionEntity>()
+                .eq(com.imperium.domain.entity.SenateOpinionEntity::getSessionId, sessionId)
+                .eq(com.imperium.domain.entity.SenateOpinionEntity::getAgentId, roleCode)
+        ) > 0;
+    }
+
+    private boolean hasTribuneReview(String docketId) {
+        return tribuneReviewMapper.selectCount(
+            new LambdaQueryWrapper<com.imperium.domain.entity.TribuneReviewEntity>()
+                .eq(com.imperium.domain.entity.TribuneReviewEntity::getDocketId, docketId)
+        ) > 0;
     }
 
     private RoleConfigEntity findRoleConfig(RoleCode roleCode) {
@@ -132,6 +253,7 @@ public class AgentDispatchService {
             logEntity.setStatus(result.success() ? "SUCCESS" : "FAILED");
             logEntity.setEndedAt(LocalDateTime.now());
             agentCallLogMapper.updateById(logEntity);
+            updateExecutionTaskDispatchStatus(docketId, roleCode, result.success());
         } catch (IOException | InterruptedException ex) {
             logEntity.setExitCode(1);
             logEntity.setStderrText(ex.getMessage());
@@ -139,7 +261,31 @@ public class AgentDispatchService {
             logEntity.setEndedAt(LocalDateTime.now());
             agentCallLogMapper.updateById(logEntity);
             log.warn("OpenClaw 调用失败：docket={} role={} cause={}", docketId, roleCode, ex.getMessage());
-            Thread.currentThread().interrupt();
+            updateExecutionTaskDispatchStatus(docketId, roleCode, false);
+            if (ex instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void updateExecutionTaskDispatchStatus(String docketId, RoleCode roleCode, boolean success) {
+        DocketEntity docket = docketMapper.selectById(docketId);
+        if (docket == null) {
+            return;
+        }
+        if (roleCode == RoleCode.LEGATUS || roleCode == RoleCode.PRAETOR || roleCode == RoleCode.AEDILE
+            || roleCode == RoleCode.QUAESTOR || roleCode == RoleCode.SCRIBA || roleCode == RoleCode.GOVERNOR) {
+            List<ExecutionTaskEntity> tasks = executionTaskMapper.selectList(
+                new LambdaQueryWrapper<ExecutionTaskEntity>()
+                    .eq(ExecutionTaskEntity::getDocketId, docketId)
+                    .eq(ExecutionTaskEntity::getRoleCode, roleCode)
+                    .eq(ExecutionTaskEntity::getStatus, "DISPATCHING")
+            );
+            for (ExecutionTaskEntity task : tasks) {
+                task.setStatus(success ? "RUNNING" : "FAILED");
+                task.setUpdatedAt(LocalDateTime.now());
+                executionTaskMapper.updateById(task);
+            }
         }
     }
 }

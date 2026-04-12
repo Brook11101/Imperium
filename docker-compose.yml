@@ -50,23 +50,35 @@ services:
       context: .
       dockerfile: backend/imperium-api/Dockerfile
     container_name: imperium-api
+    env_file:
+      - .env
     depends_on:
       mysql:
         condition: service_healthy
     environment:
+      SPRING_PROFILES_ACTIVE: docker
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: imperium
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_DB: ${MYSQL_DATABASE:-imperium}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
+      AGENT_CALLBACK_SECRET: ${AGENT_CALLBACK_SECRET:-dev-secret-change-in-prod}
+      IMPERIUM_INTERNAL_SECRET: ${IMPERIUM_INTERNAL_SECRET:-dev-secret-change-in-prod}
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   imperium-worker:
     build:
       context: .
       dockerfile: backend/imperium-worker/Dockerfile
     container_name: imperium-worker
+    env_file:
+      - .env
     depends_on:
       mysql:
         condition: service_healthy
@@ -75,27 +87,34 @@ services:
       rocketmq-broker:
         condition: service_started
       imperium-api:
-        condition: service_started
+        condition: service_healthy
     environment:
+      SPRING_PROFILES_ACTIVE: docker
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: imperium
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_DB: ${MYSQL_DATABASE:-imperium}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
       ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
       IMPERIUM_BASE_URL: http://imperium-api:8080
-      OPENCLAW_PATH: openclaw
-      AGENT_CALLBACK_SECRET: dev-secret-change-in-prod
+      OPENCLAW_PATH: /usr/local/bin/openclaw
+      AGENT_CALLBACK_SECRET: ${AGENT_CALLBACK_SECRET:-dev-secret-change-in-prod}
+      IMPERIUM_INTERNAL_SECRET: ${IMPERIUM_INTERNAL_SECRET:-dev-secret-change-in-prod}
+      OPENCLAW_STATE_DIR: /root/.openclaw
+    volumes:
+      - ${OPENCLAW_BIN_PATH:-/opt/homebrew/bin/openclaw}:/usr/local/bin/openclaw:ro
+      - ${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}:/root/.openclaw
 
   imperium-web:
     build:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_BASE: http://localhost:8080
+        VITE_API_BASE: /api
     container_name: imperium-web
     depends_on:
-      - imperium-api
+      imperium-api:
+        condition: service_healthy
     ports:
       - "5173:80"
 

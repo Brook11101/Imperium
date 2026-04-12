@@ -29,4 +29,24 @@ public class DocketTransition {
 
     /** 备注说明 */
     private String description;
+
+    public DocketState getFrom() {
+        return from;
+    }
+
+    public DocketState getTo() {
+        return to;
+    }
+
+    public Set<RoleCode> getAllowedActors() {
+        return allowedActors;
+    }
+
+    public Set<OperatingMode> getAllowedModes() {
+        return allowedModes;
+    }
+
+    public String getDescription() {
+        return description;
+    }
 }

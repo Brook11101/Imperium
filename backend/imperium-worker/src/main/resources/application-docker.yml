@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+imperium:
+  base-url: ${IMPERIUM_BASE_URL:http://imperium-api:8080}
+  internal:
+    secret: ${IMPERIUM_INTERNAL_SECRET:${AGENT_CALLBACK_SECRET:dev-secret-change-in-prod}}
+  openclaw:
+    path: ${OPENCLAW_PATH:/usr/local/bin/openclaw}
+    startup-validation: true

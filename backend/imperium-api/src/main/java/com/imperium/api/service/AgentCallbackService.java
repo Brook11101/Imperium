@@ -7,6 +7,9 @@ import com.imperium.api.model.ExecutionTaskBlockRequest;
 import com.imperium.api.model.ExecutionTaskCompleteRequest;
 import com.imperium.api.model.ExecutionTaskProgressRequest;
 import com.imperium.api.model.SenateOpinionRequest;
+import com.imperium.api.exception.DocketException;
+import com.imperium.domain.entity.ExecutionTaskEntity;
+import com.imperium.domain.mapper.ExecutionTaskMapper;
 import com.imperium.domain.model.RoleCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,7 @@ public class AgentCallbackService {
     );
 
     private final ExecutionTaskService executionTaskService;
+    private final ExecutionTaskMapper executionTaskMapper;
     private final SenateService senateService;
     private final DocketEventService docketEventService;
 
@@ -51,7 +55,7 @@ public class AgentCallbackService {
 
     public void handleResult(AgentResultCallbackRequest req) {
         if (req.roleCode() != null && SENATOR_ROLES.contains(req.roleCode())) {
-            senateService.submitOpinion(req.docketId(), new SenateOpinionRequest(
+            senateService.submitOpinion(req.docketId(), req.senateSessionId(), new SenateOpinionRequest(
                 req.roleCode(),
                 req.stance() == null ? "NEUTRAL" : req.stance(),
                 req.summary() == null ? "自动回调意见" : req.summary(),
@@ -61,6 +65,7 @@ public class AgentCallbackService {
         }
 
         if (req.executionTaskId() != null && !req.executionTaskId().isBlank()) {
+            validateExecutionTaskRole(req.executionTaskId(), req.roleCode());
             executionTaskService.complete(req.executionTaskId(), new ExecutionTaskCompleteRequest(req.outputSummary()));
             return;
         }
@@ -77,6 +82,7 @@ public class AgentCallbackService {
 
     public void handleFailure(AgentFailureCallbackRequest req) {
         if (req.executionTaskId() != null && !req.executionTaskId().isBlank()) {
+            validateExecutionTaskRole(req.executionTaskId(), req.roleCode());
             executionTaskService.block(req.executionTaskId(), new ExecutionTaskBlockRequest(
                 req.reason() == null ? "Agent execution failed" : req.reason(),
                 req.details()
@@ -91,5 +97,18 @@ public class AgentCallbackService {
                 "details", req.details() == null ? "" : req.details()
             )
         );
+    }
+
+    private void validateExecutionTaskRole(String executionTaskId, RoleCode roleCode) {
+        if (roleCode == null) {
+            return;
+        }
+        ExecutionTaskEntity task = executionTaskMapper.selectById(executionTaskId);
+        if (task == null) {
+            throw new DocketException("EXECUTION_TASK_NOT_FOUND", "执行任务不存在：" + executionTaskId);
+        }
+        if (task.getRoleCode() != roleCode) {
+            throw new DocketException("EXECUTION_TASK_ROLE_MISMATCH", "执行任务角色与回调角色不一致");
+        }
     }
 }

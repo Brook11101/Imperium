@@ -86,6 +86,11 @@ public class SenateService {
 
     @Transactional
     public SenateSessionResponse submitOpinion(String docketId, SenateOpinionRequest req) {
+        return submitOpinion(docketId, null, req);
+    }
+
+    @Transactional
+    public SenateSessionResponse submitOpinion(String docketId, String expectedSessionId, SenateOpinionRequest req) {
         DocketEntity docket = requireDocket(docketId);
         requireSenateMode(docket);
         requireSenatorRole(req.roleCode());
@@ -93,6 +98,9 @@ public class SenateService {
         SenateSessionEntity session = findOpenSession(docketId);
         if (session == null) {
             session = mapToEntity(openSession(docketId));
+        }
+        if (expectedSessionId != null && !expectedSessionId.isBlank() && !expectedSessionId.equals(session.getId())) {
+            throw new DocketException("STALE_SENATE_CALLBACK", "回调会话已过期或不匹配当前开启的元老院会话");
         }
 
         if (docket.getState() == DocketState.IN_SENATE) {
@@ -132,6 +140,12 @@ public class SenateService {
             "stance", existing.getStance(),
             "summary", existing.getSummary()
         ));
+        if ("CLOSED".equals(session.getStatus())) {
+            docketEventService.record(docketId, "SENATE_SESSION_CLOSED", "SYSTEM", "SENATE", Map.of(
+                "sessionId", session.getId(),
+                "recommendedMotion", session.getRecommendedMotion() == null ? "" : session.getRecommendedMotion()
+            ));
+        }
 
         return toResponse(session, opinions);
     }

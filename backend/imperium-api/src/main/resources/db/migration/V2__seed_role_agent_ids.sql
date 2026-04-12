@@ -1,0 +1,13 @@
+UPDATE role_config SET agent_id = 'praeco', prompt_version = 'v1' WHERE role_code = 'PRAECO';
+UPDATE role_config SET agent_id = 'senator_strategos', prompt_version = 'v1' WHERE role_code = 'SENATOR_STRATEGOS';
+UPDATE role_config SET agent_id = 'senator_juris', prompt_version = 'v1' WHERE role_code = 'SENATOR_JURIS';
+UPDATE role_config SET agent_id = 'senator_fiscus', prompt_version = 'v1' WHERE role_code = 'SENATOR_FISCUS';
+UPDATE role_config SET agent_id = 'tribune', prompt_version = 'v1' WHERE role_code = 'TRIBUNE';
+UPDATE role_config SET agent_id = 'consul', prompt_version = 'v1' WHERE role_code = 'CONSUL';
+UPDATE role_config SET agent_id = 'legatus', prompt_version = 'v1' WHERE role_code = 'LEGATUS';
+UPDATE role_config SET agent_id = 'praetor', prompt_version = 'v1' WHERE role_code = 'PRAETOR';
+UPDATE role_config SET agent_id = 'aedile', prompt_version = 'v1' WHERE role_code = 'AEDILE';
+UPDATE role_config SET agent_id = 'quaestor', prompt_version = 'v1' WHERE role_code = 'QUAESTOR';
+UPDATE role_config SET agent_id = 'scriba', prompt_version = 'v1' WHERE role_code = 'SCRIBA';
+UPDATE role_config SET agent_id = 'censor', prompt_version = 'v1' WHERE role_code = 'CENSOR';
+UPDATE role_config SET agent_id = 'governor', prompt_version = 'v1' WHERE role_code = 'GOVERNOR';
